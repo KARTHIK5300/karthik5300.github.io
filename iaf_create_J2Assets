@@ -1,0 +1,116 @@
+const CreateCustomCollection = async (param, libraries, ctx) => {
+  let { PlatformApi, IafScriptEngine } = libraries
+  let my_custom_coll = await IafScriptEngine.getCollection({
+    _userType: "bms_assets",
+    _shortName: "bms_assets",
+    _itemClass: "NamedUserCollection"
+  }, ctx);
+  return my_custom_coll
+}
+const AddRelatedItems = async (param, libraries, ctx) => {
+  let { PlatformApi, IafScriptEngine } = libraries
+  let collectionitems = param.inparams.collectionitems
+  let my_custom_coll = await IafScriptEngine.getCollection({
+    _userType: "bms_assets",
+    _shortName: "bms_assets",
+    _itemClass: "NamedUserCollection"
+  }, ctx);
+  let processedItems = collectionitems.map((item) => {
+    console.log(Object.entries(item).filter((prop) => prop[1] === "m:"));
+    return Object.assign(item, {
+      ipa_data: {
+        "Haystack Tags": Object.entries(item).filter((prop) => prop[1] === "m:").map(tagprop => tagprop[0])
+      }
+    })
+  });
+  processedItems = processedItems.map(item => {
+    return Object.assign(item, {
+      ipa_data: Object.assign(item.ipa_data,
+        {
+          "properties": {
+            "Haystack Tags": {
+              "val": item.ipa_data["Haystack Tags"].join(", "),
+              "type": "text",
+              "dName": "Haystack Tags"
+            },
+            "Display Points": {
+              "val": "All",
+              "type": "text",
+              "dName": "Display Points"
+            },
+            "siteRef": {
+              val: item?.siteRef?.display ? item.siteRef.display : "",
+              "type": "text",
+              "dName": "siteRef"
+            },
+            "floorRef": {
+              val: item?.floorRef?.display ? item.floorRef.display : "",
+              "type": "text",
+              "dName": "floorRef"
+            },
+            "id": {
+              val: item?.id?.display ? item.id.display : "",
+              "type": "text",
+              "dName": "id"
+            }
+          }
+        })
+    })
+  })
+  let allExistingItems = await IafScriptEngine.getItems({
+    collectionDesc: {
+      _userItemId: my_custom_coll._userItemId,
+      _namespaces: ctx._namespaces
+    },
+    query: {},
+    options: { page: { getAllItems: true } }
+  }, ctx)
+  let newItems = processedItems.map((item) => {
+    if(!allExistingItems.find((x) => x.id.value == item.id.value)){
+      return item
+    }
+  });
+  newItems = newItems.filter(Boolean)
+  if(allExistingItems.length > 0){
+  console.log("allExistingItems", JSON.stringify(allExistingItems))
+  let updateItems = processedItems.filter((item) => {
+    return allExistingItems.some((x) => x.id.value === item.id.value);
+  });
+  updateItems = updateItems.filter(item=>{
+    return{
+      _id:allExistingItems.find((x) => x.id.value === item.id.value)?._id,
+      ipa_data:Object.assign(item.ipa_data,{properties:Object.assign(item.ipa_data.properties,{
+        "Display Points": allExistingItems.find((x) => x.id.value === item.id.value).ipa_data.properties["Display Points"]
+      })})}
+  })
+  if (updateItems.length > 0) {
+    await IafScriptEngine.updateItemsBulk({
+      _userItemId: my_custom_coll._userItemId,
+      _namespaces: ctx._namespaces,
+      items: updateItems
+    }, ctx)
+  }
+  else {
+    console.log("No items to update")
+  }
+  }
+  if (newItems.length > 0) {
+     await IafScriptEngine.createItemsBulk({
+      _userItemId: my_custom_coll._userItemId,
+      _namespaces: ctx._namespaces,
+      items: newItems
+    }, ctx)
+  }
+  else {
+    console.log("No items to create")
+  }
+  return {
+    "j2assets": processedItems
+  }
+}
+export default {
+  async runSkysparkimplementation(input, libraries, ctx) {
+    await CreateCustomCollection(input, libraries, ctx);
+    await AddRelatedItems(input, libraries, ctx);
+  }
+}
